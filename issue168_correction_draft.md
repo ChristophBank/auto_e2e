@@ -84,9 +84,13 @@ The contract BEV grid is 256×256 = 65,536 tokens, so `cross_attn` refuses to ru
 viable at the pinned resolution, which I think makes it the intended reading of
 the "Attention" cell in this issue.
 
-Net: of the 3 × 2 × 2 = 12 cells in the issue's matrix, **6 are currently
-runnable** — {swin, convnext, resnet50} × {residual, deformable} × {bezier} — and
-that is only after the pass-through in point 1 exists.
+Net: of the 3 × 2 × 2 = 12 cells in the issue's matrix, **6 are trainable as
+specified** — {swin, convnext, resnet50} × {residual, deformable} × {bezier} — and
+only once the pass-through in point 1 exists. The other six are not "broken" in the
+same way, and the difference matters: the `flow_matching` cells *run* fine
+(forward, backward and gradients all work) but optimize the wrong objective, so
+they yield a number that looks valid and is not; the `cross_attn` cells are refused
+outright by the guard above, which is the safer failure.
 
 ## 3. The pinned split has moved to v3 — and the digest alone is not enough to prove comparability
 
@@ -163,7 +167,12 @@ shape, loss finiteness and a non-zero gradient norm:
 | swin_v2_tiny | cross_attn | bezier | **refused** — 4096-token guard, 65,536 tokens at contract BEV |
 | conv_next_v2_tiny | residual | bezier | pass — 73.9M params, grad_norm 0.063 |
 | res_net_50 | residual | bezier | pass — 70.1M params, grad_norm 0.073 |
-| swin_v2_tiny | residual | flow_matching | builds and runs, but emits the RuntimeWarning above; grad_norm 5.8 vs ~0.06 for bezier |
+| swin_v2_tiny | residual | flow_matching | runs, but emits the RuntimeWarning above |
+
+(These are random targets, so the loss values carry no meaning — the check is only
+that shapes line up and gradients are finite and non-zero. The case against
+`flow_matching` is the warning and the missing `compute_planner_loss` wiring, not
+anything measured here.)
 
 All of these had to be constructed by calling `AutoE2E(...)` directly, because
 `train_il` exposes no argument for two of the three axes — which is point 1.

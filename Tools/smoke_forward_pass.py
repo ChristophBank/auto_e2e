@@ -25,7 +25,11 @@ _MODEL_DIR = pathlib.Path(__file__).parent.parent.resolve() / "Model"
 sys.path.insert(0, str(_MODEL_DIR))
 
 from model_components.auto_e2e import AutoE2E  # noqa: E402
-from navigation.geometry import DEFAULT_NAVIGATION_GEOMETRY  # noqa: E402
+from navigation.geometry import (  # noqa: E402
+    DEFAULT_NAVIGATION_GEOMETRY,
+    MAP_CHANNEL_COUNT,
+    ROUTE_CHANNEL_COUNT,
+)
 from model_components.losses.trajectory_loss import TrajectoryImitationLoss  # noqa: E402
 
 NUM_VIEWS = 7
@@ -60,8 +64,11 @@ def main():
     parser.add_argument("--backbone", default="swin_v2_tiny")
     parser.add_argument("--map_fusion_mode", default="residual")
     parser.add_argument("--planner_mode", default="bezier")
-    parser.add_argument("--map_channels", type=int, default=14)
-    parser.add_argument("--route_channels", type=int, default=2)
+    # Defaults come from the navigation contract (MapChannel / RouteChannel),
+    # not from a hand-copied number: train_il reads the equivalent counts off
+    # the packed manifest (workflows.py:3367).
+    parser.add_argument("--map_channels", type=int, default=MAP_CHANNEL_COUNT)
+    parser.add_argument("--route_channels", type=int, default=ROUTE_CHANNEL_COUNT)
     parser.add_argument("--no-pretrained", dest="pretrained", action="store_false")
     args = parser.parse_args()
 
