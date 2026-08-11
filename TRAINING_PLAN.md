@@ -274,6 +274,54 @@ checkpoint destination, an S3-compatible endpoint, and an MLflow URI, among othe
 **Therefore: prove the whole chain on one scene first.** Download → pack → audit →
 one epoch. Only when that completes end-to-end is an overnight run worth starting.
 
+### Measured cost per stage (12-scene run, one combination)
+
+| Stage | Time | Basis |
+|---|---|---|
+| Download 12 archives (~35 GB) | **~5 min** | measured 111 MB/s (888 Mbit/s) to HuggingFace |
+| Pack 12 scenes | **1–4 h (unmeasured)** | production allocates 15 vCPU / 64 GB per *single* scene; decode workers capped at 2 for memory |
+| Navigation audit | minutes | runs over packed shards only |
+| Train, 10 epochs | **1–2 h** | 1,140 train samples × 0.30 s/step = 5.7 min/epoch GPU-bound |
+| Validation (per epoch) | seconds | ~130 samples, forward-only |
+
+Note the earlier "≈55 JPEGs per sample" figure applies **only with the World Model
+on**. Reactive-only decodes ~7 camera JPEGs plus the map per sample, so decode is
+roughly 10–20 ms/sample and overlaps with the GPU once `num_workers>0`. Data loading
+is therefore *not* expected to dominate this configuration.
+
+### Two combinations in one night?
+
+**Yes on compute — packing is done once and reused by both runs.**
+
+```
+pack 12 scenes (once)   1–4 h
+train combination A     1–2 h
+train combination B     1–2 h
+                        ---------
+total                   3–8 h
+```
+
+**But which two combinations decides whether it is possible at all:**
+
+- **Two backbones** (e.g. `swin_v2_tiny` vs `conv_next_v2_tiny`) — works today;
+  `backbone` is a real `train_il` parameter.
+- **Two fusions or two planners** — **impossible today.** `train_il` ignores both, so
+  the two runs would be byte-identical and produce two numbers that differ only by
+  random seed. This needs the ~30-line fix in §6 *first*.
+
+### Missing packing dependencies
+
+Two packages the packing path imports are **not** in `requirements.txt` and are not
+installed:
+
+| Package | Source | Needed for |
+|---|---|---|
+| `kitscenes` | `github.com/KIT-MRT/kitscenes` (not on PyPI) | reading raw scenes — `dataset.py:18` |
+| `lanelet2` | pip, or `conda -c robostack-staging` | HD-map parsing during packing |
+
+Without `lanelet2` map tiles silently fall back to zero tensors, so this is not
+optional — a run would train on blank maps and look like it worked.
+
 ### Verdict
 
 **Tonight: no.** Not for hardware reasons — the GPU is free, the model runs, the
