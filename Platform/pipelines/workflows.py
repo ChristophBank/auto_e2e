@@ -197,6 +197,16 @@ class MapFusion(enum.Enum):
     DEFORMABLE = "deformable"
 
 
+# FLOW_MATCHING builds and runs, but train_il's loop SmoothL1-regresses the
+# planner output while FlowMatchingPlanner.forward Euler-integrates from fresh
+# noise — that is not the velocity-MSE flow objective, so it optimizes toward
+# the conditional mean. build_planner emits a RuntimeWarning saying so. Keep
+# BEZIER until compute_planner_loss is wired into the training loop.
+class Planner(enum.Enum):
+    BEZIER = "bezier"
+    FLOW_MATCHING = "flow_matching"
+
+
 def _row_decode_worker_count(dataset: Dataset, row_count: int) -> int:
     """Bound row decoders by each parser's per-process memory footprint."""
     # Each KITScenes child reparses the scene's Lanelet2 map and calibration.
@@ -3063,9 +3073,10 @@ def train_il(
     shards: List[FlyteDirectory],
     dataset: Dataset = Dataset.L2D,
     backbone: Backbone = Backbone.SWIN_V2_TINY,
-    # Defaults to the previously hardcoded value, so a run that does not pass it
-    # is unchanged.
+    # Defaults reproduce the previously hardcoded behaviour exactly, so runs
+    # that do not pass these are byte-identical to before (#168).
     map_fusion_mode: MapFusion = MapFusion.RESIDUAL,
+    planner_mode: Planner = Planner.BEZIER,
     epochs: int = 3,
     batch_size: int = 4,
     # Effective batch size = batch_size * grad_accum_steps. The World-Model
@@ -3294,7 +3305,7 @@ def train_il(
         ctx.execution_id.name if ctx.execution_id else "local"
     )
     bb, fm = backbone.value, FUSION_LABEL
-    mfm = map_fusion_mode.value
+    mfm, pm = map_fusion_mode.value, planner_mode.value
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     training_policy = training_policy_for_dataset(
         dataset.value,
@@ -3305,7 +3316,7 @@ def train_il(
     )
 
     print(f"Training: backbone={bb} fusion={fm} epochs={epochs} bs={batch_size} device={device}")
-    print(f"Map BEV fusion: {mfm}")
+    print(f"Model variation: map_fusion={mfm} planner={pm}")
 
     # MERGED DataLoader over ALL provided shard dirs. Each dataset keeps its own
     # geometry/num_views; batches are same-dataset (uniform), interleaved across
@@ -3920,7 +3931,7 @@ def train_il(
         map_context_channels=map_context_channels,
         route_channels=route_channels,
         enable_route_conditioning=enable_route_conditioning,
-        map_fusion_mode=mfm,
+        map_fusion_mode=mfm, planner_mode=pm,
         enable_reasoning=enable_reasoning, reasoning_mode=reasoning_mode,
         enable_world_model=enable_world_model,
     ).to(device)
@@ -4035,11 +4046,12 @@ def train_il(
     scaler = torch.amp.GradScaler(enabled=amp)
     checkpoint_config = {
         "backbone": bb,
-        # Carried in the checkpoint so evaluation rebuilds the SAME architecture:
-        # _model_kwargs feeds this dict into AutoE2E(**config), so without the key
-        # a non-default run would be reconstructed with the constructor default
-        # and load mismatched weights.
+        # Carried in the checkpoint so evaluation reconstructs the SAME
+        # architecture: _model_kwargs feeds this dict straight into
+        # AutoE2E(**config). Without these two keys a non-default run would be
+        # rebuilt with the constructor defaults and load mismatched weights.
         "map_fusion_mode": mfm,
+        "planner_mode": pm,
         "embed_dim": 256,
         "num_views": num_views,
         "view_fusion_kwargs": view_fusion_kwargs,
@@ -4409,6 +4421,7 @@ def train_il(
                 "model/backbone": bb,
                 "model/fusion_mode": fm,
                 "model/map_fusion_mode": mfm,
+                "model/planner_mode": pm,
                 "model/num_views": num_views,
                 "model/navigation_geometry_id": (
                     navigation_geometry_id or "legacy"
@@ -8701,6 +8714,7 @@ def wf_train_il(
     dataset: Dataset = Dataset.L2D,
     backbone: Backbone = Backbone.SWIN_V2_TINY,
     map_fusion_mode: MapFusion = MapFusion.RESIDUAL,
+    planner_mode: Planner = Planner.BEZIER,
     epochs: int = 3,
     batch_size: int = 4,
     grad_accum_steps: int = 1,
@@ -8744,7 +8758,7 @@ def wf_train_il(
     — the dominant per-epoch cost once episodes scale up.
     """
     out = train_il(shards=shards, dataset=dataset, backbone=backbone,
-                   map_fusion_mode=map_fusion_mode,
+                   map_fusion_mode=map_fusion_mode, planner_mode=planner_mode,
                    epochs=epochs, batch_size=batch_size,
                    grad_accum_steps=grad_accum_steps, lr=lr,
                    training_seed=training_seed, amp=amp,
