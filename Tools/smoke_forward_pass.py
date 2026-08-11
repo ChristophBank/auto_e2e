@@ -32,7 +32,10 @@ from navigation.geometry import (  # noqa: E402
 )
 from model_components.losses.trajectory_loss import TrajectoryImitationLoss  # noqa: E402
 
-NUM_VIEWS = 7
+# KITScenes ships 6 cameras (data_parsing/kit_scenes/camera.py: CAMERA_NAMES),
+# and train_il derives num_views from the packed manifest. Verified against a
+# real scene: visual_tiles is (6, 3, 256, 256).
+NUM_VIEWS = 6
 IMAGE_SIZE = 256
 NUM_TIMESTEPS = 64
 NUM_SIGNALS = 2
