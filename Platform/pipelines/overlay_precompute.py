@@ -197,6 +197,20 @@ def planner_is_deterministic(model: torch.nn.Module) -> bool:
     return planner.__class__.__name__.lower().startswith("bezier")
 
 
+def seed_batch(batch: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a per-seed view of ``batch`` that ``forward`` cannot corrupt.
+
+    Seeds are meant to differ only in the noise prior, so every iteration of the
+    fan must see the same inputs. ``AutoE2E.forward`` rescales
+    ``egomotion_history``, and a forward that does so in place makes seed N read
+    seed N-1's output — silently, and compounding, because the scaling is not
+    idempotent. Cloning the small ``[B, 256]`` ego vector keeps the seed fan
+    independent without copying the image tensors, which are ~4 orders of
+    magnitude larger.
+    """
+    return {**batch, "egomotion_history": batch["egomotion_history"].clone()}
+
+
 def batch_to_device(
     batch: Mapping[str, Any],
     device: str | torch.device,
@@ -312,6 +326,15 @@ def _infer_loader(
                     batch["egomotion_history"],
                     training_policy,
                 )
+            # Read v0 BEFORE any inference runs. batch_to_device is a no-op for
+            # a CPU device, so batch["egomotion_history"] can be the very tensor
+            # raw_batch holds; taking the speed afterwards would report whatever
+            # forward left behind rather than the recorded ego speed.
+            history = raw_batch["egomotion_history"].reshape(
+                len(sample_uids), 64, 4
+            )
+            speeds = history[:, -1, 0].detach().cpu().numpy().astype(np.float32)
+
             per_seed = []
             for seed_index, seed in enumerate(seeds):
                 if recorder is not None:
@@ -319,7 +342,7 @@ def _infer_loader(
                 per_seed.append(
                     predict_control(
                         model,
-                        batch,
+                        seed_batch(batch),
                         sample_uids=sample_uids,
                         model_artifact_id=model_artifact_id,
                         dataset_manifest_digest=dataset_manifest_digest,
@@ -329,10 +352,6 @@ def _infer_loader(
                     )
                 )
             controls = np.stack(per_seed, axis=1)
-            history = raw_batch["egomotion_history"].reshape(
-                len(sample_uids), 64, 4
-            )
-            speeds = history[:, -1, 0].detach().cpu().numpy().astype(np.float32)
 
             all_uids.extend(sample_uids)
             control_batches.append(controls)

@@ -18,6 +18,7 @@ from Platform.pipelines.overlay_precompute import (
     _spatial_feature_deviation,
     infer_loader_controls,
     infer_loader_overlay,
+    seed_batch,
 )
 from training.dataset_policy import KITSCENES_TRAINING_POLICY
 
@@ -86,6 +87,34 @@ class _NoiseEchoPolicy(torch.nn.Module):
     ):
         self.last_egomotion_history = egomotion_history.detach().clone()
         return initial_noise + self.anchor
+
+
+class _InPlaceNormalizingPolicy(_NoiseEchoPolicy):
+    """A policy that rescales its egomotion input in place, as AutoE2E does.
+
+    Not a hypothetical: this mirrors ``normalize_egomotion``, which divides the
+    speed column by 33. Written in place and re-run over one batch, the scaling
+    compounds — so the seed fan must hand each iteration its own tensor and v0
+    must be read before any of it happens.
+    """
+
+    SPEED_SCALE = 33.0
+    ACCELERATION_SCALE = 8.0
+
+    def __init__(self):
+        super().__init__()
+        self.seen_speeds = []
+
+    def forward(self, camera_tiles, map_context, visual_history,
+                egomotion_history, **kwargs):
+        history = egomotion_history.reshape(-1, 64, 4)
+        self.seen_speeds.append(history[:, -1, 0].detach().clone())
+        history[:, :, 0] /= self.SPEED_SCALE
+        history[:, :, 1] /= self.ACCELERATION_SCALE
+        return super().forward(
+            camera_tiles, map_context, visual_history, egomotion_history,
+            **kwargs,
+        )
 
 
 class _AddFusion(torch.nn.Module):
@@ -255,6 +284,96 @@ def test_infer_loader_overlay_isolates_encoder_contributions():
     np.testing.assert_array_equal(heatmaps[:, 3], 0.0)
     np.testing.assert_allclose(heatmaps[:, 4], np.sqrt(45.0 / 3.0))
     np.testing.assert_array_equal(heatmaps[:, 5], 0.0)
+
+
+def _speed_batch(size, speed, first_frame=64):
+    batch = _batch(size)
+    batch["sample_uid"] = [
+        f"l2d-v1-e000001-f{first_frame + index:06d}" for index in range(size)
+    ]
+    batch["egomotion_history"].reshape(size, 64, 4)[:, :, 0] = speed
+    return batch
+
+
+class _Loader(list):
+    projection = None
+    geometry_type = "pseudo"
+
+
+def test_seed_fan_gives_every_seed_the_same_egomotion_input():
+    """A forward that rescales in place must not leak into the next seed.
+
+    Without a per-seed tensor the second seed reads speed/33, the third
+    speed/33**2, and so on. Nothing raises — the controls just come from an
+    input that is orders of magnitude too small.
+    """
+    model = _InPlaceNormalizingPolicy().eval()
+
+    infer_loader_controls(
+        model,
+        _Loader([_speed_batch(2, 30.0)]),
+        model_artifact_id="model-sha",
+        dataset_manifest_digest="manifest-sha",
+        base_seeds=(0, 1, 2),
+        device="cpu",
+    )
+
+    assert len(model.seen_speeds) == 3
+    for seen in model.seen_speeds:
+        torch.testing.assert_close(seen, torch.full((2,), 30.0))
+
+
+def test_v0_reports_the_recorded_speed_not_the_rescaled_one():
+    """v0 feeds trajectory integration, so it must be the raw ego speed.
+
+    ``batch_to_device`` is a no-op on CPU, so the batch handed to the model can
+    be the loader's own tensor. Reading v0 after inference would report
+    whatever forward left in it.
+    """
+    model = _InPlaceNormalizingPolicy().eval()
+
+    _, _, v0, _ = infer_loader_controls(
+        model,
+        _Loader([
+            _speed_batch(2, 30.0),
+            _speed_batch(1, 12.0, first_frame=128),
+        ]),
+        model_artifact_id="model-sha",
+        dataset_manifest_digest="manifest-sha",
+        base_seeds=(0, 1),
+        device="cpu",
+    )
+
+    np.testing.assert_allclose(v0, [30.0, 30.0, 12.0])
+
+
+def test_inference_leaves_the_loader_batch_untouched():
+    model = _InPlaceNormalizingPolicy().eval()
+    batch = _speed_batch(2, 30.0)
+    before = batch["egomotion_history"].clone()
+
+    infer_loader_controls(
+        model,
+        _Loader([batch]),
+        model_artifact_id="model-sha",
+        dataset_manifest_digest="manifest-sha",
+        base_seeds=(0, 1),
+        device="cpu",
+    )
+
+    assert torch.equal(batch["egomotion_history"], before)
+
+
+def test_seed_batch_shares_the_image_tensors_it_does_not_clone():
+    """The ego vector is cloned; the ~40 MB image tensors must not be."""
+    batch = _speed_batch(2, 30.0)
+
+    seeded = seed_batch(batch)
+
+    assert seeded["egomotion_history"] is not batch["egomotion_history"]
+    assert torch.equal(seeded["egomotion_history"], batch["egomotion_history"])
+    assert seeded["visual_tiles"] is batch["visual_tiles"]
+    assert seeded["map_context"] is batch["map_context"]
 
 
 def test_spatial_feature_deviation_preserves_channel_direction_changes():
