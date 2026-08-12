@@ -1,0 +1,58 @@
+# Experiment registry for issue #168 (Federated Model Training).
+#
+# Everything under `shared` is held constant across runs so that any two entries
+# in `runs` differ in exactly the axes named there. That is what makes the ADE
+# numbers comparable — see Docs/running_experiments.md.
+#
+# Add a run, do not edit an existing one: a completed run's settings are the
+# provenance of its number.
+
+shared:
+  dataset: KITSCENES
+  epochs: 20
+  batch_size: 1
+  # Effective batch = batch_size * grad_accum_steps. A batch-1 SmoothL1 gradient
+  # is too noisy for the loss to descend past ~0.84; accumulation recovers the
+  # batch-4 signal at batch-1 memory.
+  grad_accum_steps: 4
+  lr: 1.0e-4
+  num_workers: 4
+  # fp16 autocast made the GradScaler skip every optimizer step, so the loss sat
+  # flat while the run looked healthy. Leave this off.
+  amp: false
+  # Pinned: dataset_policy checks val_fraction against the frozen manifest and
+  # rejects anything else. More validation scenes require more partitions.
+  val_fraction: 0.1
+  # "full" requires all 533 packed partitions. Anything less must use "subset",
+  # which keeps the same provenance triple but derives the holdout from the
+  # packed inventory — so subset numbers compare to other subset runs on the
+  # same group_digest, not to full-corpus runs.
+  validation_scope: subset
+
+runs:
+  - name: ab_residual
+    backbone: swin_v2_tiny
+    map_fusion_mode: residual
+    planner_mode: bezier
+    seed: 149
+
+  - name: ab_deformable
+    backbone: swin_v2_tiny
+    map_fusion_mode: deformable
+    planner_mode: bezier
+    seed: 149
+
+  # Second seed: the epoch-to-epoch spread inside one run (1.05-2.07 m ADE) is
+  # larger than the difference between the two runs above, so a single seed
+  # cannot separate the two fusions.
+  - name: ab_residual_s2
+    backbone: swin_v2_tiny
+    map_fusion_mode: residual
+    planner_mode: bezier
+    seed: 271
+
+  - name: ab_deformable_s2
+    backbone: swin_v2_tiny
+    map_fusion_mode: deformable
+    planner_mode: bezier
+    seed: 271
