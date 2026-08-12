@@ -75,6 +75,11 @@ def main():
     ap.add_argument("--title", default="AutoE2E run comparison")
     ap.add_argument("--subtitle", default="")
     ap.add_argument("--provenance", default="", help="digest line printed at the bottom")
+    # A training-free reference matters more than the gap between two runs: if a
+    # model does not clear constant-velocity, perception is not contributing.
+    ap.add_argument("--baseline-ade", type=float, default=None)
+    ap.add_argument("--baseline-fde", type=float, default=None)
+    ap.add_argument("--baseline-label", default="constant velocity")
     args = ap.parse_args()
 
     if len(args.logs) > len(SERIES_COLORS):
@@ -125,6 +130,15 @@ def main():
                 vfmt.format(r[key][bi]), (r["epochs"][bi], r[key][bi]),
                 textcoords="offset points", xytext=(6, dy), ha="left",
                 fontsize=9, fontweight="bold", color=r["color"], zorder=5,
+            )
+
+        baseline = {"ade": args.baseline_ade, "fde": args.baseline_fde}.get(key)
+        if baseline is not None:
+            ax.axhline(baseline, color=INK_2, linewidth=1.4,
+                       linestyle=(0, (5, 3)), zorder=2)
+            ax.text(
+                runs[labels[0]]["epochs"][0], baseline, f" {args.baseline_label}",
+                va="bottom", ha="left", fontsize=8.5, color=INK_2, zorder=5,
             )
 
         last = max(r["epochs"][-1] for r in runs.values())

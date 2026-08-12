@@ -197,16 +197,31 @@ costs 17% throughput.
 while validation ADE does not improve — identically under both fusions. At 48
 scenes the limiting factor is data quantity, not architecture.
 
-### The result that needs checking first
+### Neither run beats a constant-velocity baseline
 
-PR #189 reports a **constant-velocity baseline at 0.883 m ADE@3s** — no
-perception at all. Our best trained model is 1.053 m. On a different split
-(585/65, 4,049 validation samples), so not directly comparable — but
-`Model/evaluation/baselines.py` says exactly why it matters: *"if the model
-barely beats constant-velocity, perception isn't contributing"*.
+Scored on the **identical 562 samples** — `sample_uid_digest 7682983a…` matches
+the training run's exactly, so this is not an approximate comparison:
 
-**Measure `constant_velocity_baseline()` on our own `group_digest` before
-reporting anything.** Until then the 1.053 m has no reference point.
+| | ADE@3s | FDE@3s |
+|---|---|---|
+| **constant velocity** (accel=0, curv=0) | **0.958 m** | **2.673 m** |
+| deformable (best) | 1.053 m (+9.9%) | 2.885 m (+7.9%) |
+| residual (best) | 1.179 m (+23.1%) | 3.481 m (+30.2%) |
+
+`Model/evaluation/baselines.py` states the test: *"if the model barely beats
+constant-velocity, perception isn't helping yet"*. Ours do not beat it at all.
+
+This is consistent with PR #189 (0.883 m on a different split) and with every
+ADE posted to the thread (1.16 m, 2.14 m, 3.62 m): **no reported run has yet
+cleared the trivial baseline.** The open question is therefore not which fusion
+is better but why the camera and map inputs are not contributing.
+
+Reproduce with:
+
+```bash
+python Tools/experiments/run_baseline.py \
+    --metadata /tmp/train/metadata.json --packed /path/to/packed
+```
 
 ---
 

@@ -54,11 +54,21 @@ batch 1×4, amp off, subset scope. Both early-stopped at epoch 8, best at epoch 
   training loss 0.26→0.13 while validation ADE flatlines. At 48 scenes the
   limiting factor is data quantity, not architecture. This matches the WG note
   *"network quality depends on input data quality, not just architecture changes"*.
-- **C3 — Our number may not beat a trivial baseline.** PR #189 reports
-  constant-velocity at **0.883 m ADE@3s** with no perception; our best is 1.053 m.
-  Different split, so not directly comparable — but `evaluation/baselines.py`
-  states the test: *"if the model barely beats constant-velocity, perception isn't
-  contributing"*. **Measure it on our own split before reporting.**
+- **C3 — Neither trained model beats a constant-velocity baseline.** Measured on
+  the identical 562 samples (`sample_uid_digest 7682983a…` matches the training
+  run's exactly), a no-perception baseline of `accel=0, curv=0` scores:
+
+  | | ADE@3s | FDE@3s |
+  |---|---|---|
+  | **constant velocity** | **0.958 m** | **2.673 m** |
+  | deformable (best) | 1.053 m (+9.9%) | 2.885 m (+7.9%) |
+  | residual (best) | 1.179 m (+23.1%) | 3.481 m (+30.2%) |
+
+  `evaluation/baselines.py` states the test: *"if the model barely beats
+  constant-velocity, perception isn't helping yet"*. Ours do not beat it at all.
+  Consistent with PR #189's 0.883 m on a different split, and with every ADE
+  posted to the thread so far (1.16 m, 2.14 m, 3.62 m) — **no reported run has
+  cleared the trivial baseline.**
 
 ## D. Environment traps
 
@@ -108,8 +118,9 @@ and crashes against the repo's numpy 2.2.6.
 
 ## G. Next actions, in order
 
-1. **Constant-velocity baseline on our `group_digest`** — decides whether §C is a
-   result at all. `constant_velocity_baseline()` already exists.
+1. ~~Constant-velocity baseline~~ — **done, and it changes the headline**: neither
+   run clears it (C3). The next question is *why* perception is not contributing,
+   not which fusion is better.
 2. **Narrow and rebase the harness PR** (E).
 3. **Second seed per fusion** — without it, C1 is not publishable.
 4. **More data** (150–200 scenes) — C2 says this is the real lever.
