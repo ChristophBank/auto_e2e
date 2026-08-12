@@ -120,15 +120,47 @@ Verified by running each (`Tools/smoke_forward_pass.py`):
 A scene needs 64 history + 1 + 64 future = **129 consecutive good frames**
 (12.9 s at 10 Hz) for even one sample.
 
-**Measured on the 60 scenes used here:** 272 GB raw → 381 MB packed (~170×);
-5,666 samples; 56 partitions non-empty; 48 accepted by the navigation audit.
+**Measured on the 60 scenes used here:** 272 GB raw → **1.5 GB packed (~181×)**,
+about 25 MB per partition; 5,666 samples; 56 partitions non-empty; 48 accepted by
+the navigation audit.
 
 **Archive size predicts eligibility.** Selecting archives of 4–6 GB gave 93%
 non-empty; a contributor sampling without that filter reported ~60% discarded.
 
-Download is not the bottleneck — measured **111 MB/s**, so 60 archives took
-12.3 min. Packing took 7.3 min for 14 scenes (~35 s/scene). The earlier estimate
-of 1–4 h for packing was wrong by an order of magnitude.
+### Measured cost per stage
+
+| Stage | Rate | This run (60 scenes) |
+|---|---|---|
+| Download | 111 MB/s (**12.3 s/GB**) | 12.3 min |
+| Extract | **2.6 s/scene** | 2.0 min |
+| Pack | **28.7 s/scene** | 22.0 min (46 scenes) |
+| Navigation audit | < 1 s for 60 partitions | seconds |
+| **Data preparation total** | | **~47 min** |
+
+Neither download nor packing is the bottleneck — the earlier estimate of 1–4 h
+for packing was wrong by an order of magnitude.
+
+### Training cost
+
+Per epoch: **4,293 training samples + 562 validation samples**.
+
+| | per epoch | training | validation |
+|---|---|---|---|
+| residual | **7.42 min** | 414 s (10.36 samples/s) | ~30 s |
+| deformable | **8.92 min** | 502 s (8.57 samples/s) | ~30 s |
+
+Validation is forward-only at ~0.05 s/sample, so it never dominates. Eight epochs
+took 59.3 min (residual) and 71.3 min (deformable).
+
+To size a run before starting it:
+
+```
+prep ≈ scenes × (12.3 s/GB × GB_per_scene + 2.6 s + 28.7 s)
+run  ≈ epochs × (train_samples × 0.097 s + 30 s)          # residual
+```
+
+End-to-end from an empty machine to the first number: roughly **3.2 h** —
+~1.5 h environment setup, ~47 min data, ~1 h training.
 
 ---
 

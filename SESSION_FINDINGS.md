@@ -25,10 +25,12 @@ Everything here was verified by running it or reading the code, not inferred.
 |---|---|
 | Full KITScenes train split | 2,619 GB, 533 archives, mean 4.91 GB |
 | Download throughput | **111 MB/s** — 60 archives in 12.3 min |
-| Packing | **~35 s/scene**; 272 GB raw → 381 MB packed (~170×) |
+| Packing | **28.7 s/scene** (+2.6 s extract); 272 GB raw → 1.5 GB packed (~181×) |
 | Peak VRAM (6 cams, bs=1 / 2 / 4) | 5.63 GB / 12.08 GB / **OOM** |
 | Training throughput | 10.36 samples/s (residual), 8.57 (deformable) |
-| Epoch time, 48 partitions | ~7.5 min |
+| Epoch time, 48 partitions | 7.42 min (residual) / 8.92 min (deformable) |
+| Samples per epoch | 4,293 train + 562 validation |
+| Data preparation, 60 scenes | ~47 min total (download 12.3 + extract 2.0 + pack 22.0) |
 | Scene eligibility, 4–6 GB archives | 56/60 non-empty; 48 after the navigation audit |
 | Repo test suite | 927 passed, 3 failed (all `physical_ai_av`, an optional NVIDIA-only package) |
 
