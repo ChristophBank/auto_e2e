@@ -56,3 +56,29 @@ runs:
     map_fusion_mode: deformable
     planner_mode: bezier
     seed: 271
+
+  # Camera ablation pair. Both runs are deformable and identical in every other
+  # respect; the only difference is whether the camera tensor is zeroed. If ADE
+  # does not get worse without cameras, the model demonstrably is not using the
+  # images — which is the open question behind every number in #168, since no
+  # trained result so far beats a constant-velocity baseline (0.958 m ADE@3s).
+  #
+  # These must be run against each other, NOT against ab_residual/ab_deformable
+  # above: those predate the egomotion normalization on main (920add24), so the
+  # model sees a different input distribution and the numbers do not compare.
+  #
+  # zero_cameras is honoured by run_experiment.py only. It is NOT a train_il
+  # parameter and leaves no trace in the checkpoint — see install_camera_ablation.
+  - name: cam_ablation_with_cameras
+    backbone: swin_v2_tiny
+    map_fusion_mode: deformable
+    planner_mode: bezier
+    seed: 149
+    zero_cameras: false
+
+  - name: cam_ablation_no_cameras
+    backbone: swin_v2_tiny
+    map_fusion_mode: deformable
+    planner_mode: bezier
+    seed: 149
+    zero_cameras: true

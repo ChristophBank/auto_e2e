@@ -56,6 +56,36 @@ def load_config():
     return cfg["shared"], runs
 
 
+def install_camera_ablation():
+    """Replace the camera tensor with zeros on every forward.
+
+    Patched at ``AutoE2E.forward`` rather than in the loader because ``train_il``
+    builds its own loaders for training and for evaluation. One patch point
+    covers both, which is the property that makes this an ablation: zeroing the
+    cameras only during training would measure a train/test mismatch instead of
+    what the cameras contribute.
+
+    Zero is post-normalization, so the model sees the dataset mean image rather
+    than black — the usual "no information, same statistics" ablation.
+
+    Deliberately local. It leaves no mark in ``checkpoint_config``, so an
+    ablation checkpoint is indistinguishable from a normal one after the fact;
+    the run name and the result JSON are the only record. Do not evaluate one of
+    these checkpoints outside this script and report the number as a plain run.
+    """
+    import torch
+    from model_components.auto_e2e import AutoE2E
+
+    original_forward = AutoE2E.forward
+
+    def forward_without_cameras(self, camera_tiles, *args, **kwargs):
+        return original_forward(
+            self, torch.zeros_like(camera_tiles), *args, **kwargs
+        )
+
+    AutoE2E.forward = forward_without_cameras
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", help="run name from experiments.yaml")
@@ -67,11 +97,15 @@ def main():
     shared, runs = load_config()
 
     if args.list:
-        print(f"{'run':<22} {'backbone':<18} {'map_fusion':<12} {'planner':<14} seed")
+        print(
+            f"{'run':<28} {'backbone':<18} {'map_fusion':<12} "
+            f"{'planner':<10} {'seed':<6} cameras"
+        )
         for name, r in runs.items():
+            cameras = "ZEROED" if r.get("zero_cameras") else "on"
             print(
-                f"{name:<22} {r['backbone']:<18} {r['map_fusion_mode']:<12} "
-                f"{r['planner_mode']:<14} {r['seed']}"
+                f"{name:<28} {r['backbone']:<18} {r['map_fusion_mode']:<12} "
+                f"{r['planner_mode']:<10} {r['seed']:<6} {cameras}"
             )
         return
 
@@ -95,10 +129,20 @@ def main():
         f"planner_mode    {run['planner_mode']}\n"
         f"seed            {run['seed']}"
     )
+    zero_cameras = bool(run.get("zero_cameras", False))
+    print(f"cameras         {'ZEROED (ablation)' if zero_cameras else 'on'}")
     print(
         f"epochs {shared['epochs']}  batch {shared['batch_size']}"
         f"x{shared['grad_accum_steps']}  lr {shared['lr']}  amp {shared['amp']}\n"
     )
+    if zero_cameras:
+        install_camera_ablation()
+        print(
+            "!! CAMERA ABLATION ACTIVE — visual_tiles are zeroed in training "
+            "AND evaluation.\n"
+            "!! The checkpoint does NOT record this. Its only record is this "
+            "run's name and result JSON.\n"
+        )
 
     audit = audit_kitscenes_navigation_quality.task_function(shards=shards)
 
@@ -128,6 +172,7 @@ def main():
         **{k: v for k, v in run.items()},
         **{k: v for k, v in shared.items()},
         "partitions": len(partitions),
+        "zero_cameras": zero_cameras,
         "elapsed_s": round(elapsed, 1),
         "checkpoint": str(out.checkpoint),
         "metadata": str(out.metadata),
