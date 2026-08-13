@@ -32,6 +32,13 @@ os.environ.setdefault("AWS_ENDPOINT_URL", "http://localhost:9000")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "autoe2e")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "autoe2e123")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+# train_il reads this as a bare os.environ[...], so an unset value is a KeyError
+# thrown away several minutes into the run, after the audit and the data scan.
+# A file-backed store is not enough: MLflow puts the file store into maintenance
+# mode and refuses to log, so use sqlite.
+os.environ.setdefault(
+    "MLFLOW_TRACKING_URI", f"sqlite:///{REPO / 'mlflow.db'}"
+)
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 sys.path.insert(0, str(REPO / "Model"))
@@ -92,9 +99,25 @@ def main():
     ap.add_argument("--packed", help="directory of packed WebDataset partitions")
     ap.add_argument("--results", default=None, help="where to write the result JSON")
     ap.add_argument("--list", action="store_true", help="list configured runs and exit")
+    ap.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="override shared.epochs — for smoke tests only, not for a "
+             "reportable run (the epoch budget is part of a run's provenance)",
+    )
+    ap.add_argument(
+        "--limit-partitions",
+        type=int,
+        default=None,
+        help="use only the first N partitions — smoke tests only, this changes "
+             "the validation split and therefore the group_digest",
+    )
     args = ap.parse_args()
 
     shared, runs = load_config()
+    if args.epochs is not None:
+        shared = {**shared, "epochs": args.epochs}
 
     if args.list:
         print(
@@ -119,6 +142,9 @@ def main():
     partitions = sorted(p for p in packed.iterdir() if (p / "manifest.json").is_file())
     if not partitions:
         raise SystemExit(f"no packed partitions under {packed}")
+    smoke = args.epochs is not None or args.limit_partitions is not None
+    if args.limit_partitions is not None:
+        partitions = partitions[: args.limit_partitions]
 
     shards = [FlyteDirectory(path=str(p)) for p in partitions]
     print(f"=== {run['name']} ===")
@@ -168,17 +194,24 @@ def main():
 
     results_dir = pathlib.Path(args.results or (packed.parent / "results"))
     results_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{run['name']}_SMOKE" if smoke else run["name"]
     payload = {
         **{k: v for k, v in run.items()},
         **{k: v for k, v in shared.items()},
         "partitions": len(partitions),
         "zero_cameras": zero_cameras,
+        # A smoke run changes the epoch budget and/or the partition set, so its
+        # split and digests differ from the configured run. Never report one.
+        "smoke": smoke,
         "elapsed_s": round(elapsed, 1),
         "checkpoint": str(out.checkpoint),
         "metadata": str(out.metadata),
     }
-    (results_dir / f"{run['name']}.json").write_text(json.dumps(payload, indent=2))
-    print(f"\n=== {run['name']} finished in {elapsed / 60:.1f} min ===")
+    (results_dir / f"{name}.json").write_text(json.dumps(payload, indent=2))
+    print(f"\n=== {name} finished in {elapsed / 60:.1f} min ===")
+    if smoke:
+        print("SMOKE RUN — split and digests differ from the configured run. "
+              "Do not report this number.")
 
 
 if __name__ == "__main__":

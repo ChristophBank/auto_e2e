@@ -30,3 +30,7 @@ Platform/infra/environments/*/secrets.auto.tfvars
 # Environment file holding account IDs, ODCR IDs, profile names, etc.
 # Committed template: .env.example. Real values never committed.
 .env
+
+# Local MLflow tracking store (Tools/experiments/run_experiment.py)
+mlflow.db
+mlruns/
