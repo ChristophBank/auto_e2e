@@ -89,8 +89,8 @@ token scoped to your own namespace returns 403 on someone else's repo.
 ## 3. Get the data
 
 The full train split is **2,619 GB** across 533 archives (mean 4.91 GB), so
-extract → pack → delete one scene at a time. Packed output is ~170× smaller: 60
-scenes come to 381 MB.
+extract → pack → delete one scene at a time. Packed output is ~181× smaller:
+measured here, 60 scenes are 272 GB raw and **1.5 GB packed**.
 
 Pin the revision. The contract expects `6fde0034…`; HuggingFace `main` has moved
 past it and `data_ingest` rejects anything else.
